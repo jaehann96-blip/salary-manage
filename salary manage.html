@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>직원 급여관리</title>
+<style>
+  :root{
+    --bg:#f4f6fa; --card:#fff; --line:#e3e8ef; --ink:#1f2937; --muted:#6b7280;
+    --accent:#2563eb; --accent-soft:#eff4ff; --sun:#e11d48; --sat:#2563eb;
+    --good:#059669; --warn:#d97706;
+  }
+  *{box-sizing:border-box;font-family:'Malgun Gothic','맑은 고딕',Arial,sans-serif}
+  body{margin:0;background:var(--bg);color:var(--ink)}
+  header{background:var(--card);border-bottom:1px solid var(--line);padding:14px 20px;
+    display:flex;align-items:center;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:20}
+  h1{font-size:18px;margin:0}
+  .settings{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-left:auto}
+  .field{display:flex;flex-direction:column;font-size:11px;color:var(--muted)}
+  .field input{font-size:14px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;width:110px;color:var(--ink)}
+  .wrap{max-width:1100px;margin:0 auto;padding:18px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+  .tab{padding:8px 14px;border:1px solid var(--line);background:var(--card);border-radius:999px;
+    cursor:pointer;font-size:14px;display:flex;align-items:center;gap:6px}
+  .tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .tab .del{opacity:.6;font-weight:bold}
+  .tab .del:hover{opacity:1}
+  .btn{padding:8px 14px;border:1px dashed var(--accent);background:var(--accent-soft);
+    color:var(--accent);border-radius:999px;cursor:pointer;font-size:14px}
+  .btn.solid{background:var(--accent);color:#fff;border:none}
+  .monthbar{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+  .monthbar h2{font-size:20px;margin:0;min-width:160px;text-align:center}
+  .nav{border:1px solid var(--line);background:var(--card);border-radius:8px;width:36px;height:36px;
+    cursor:pointer;font-size:18px}
+  .empname{font-size:16px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:160px}
+  .cal{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  table{border-collapse:collapse;width:100%}
+  th,td{border:1px solid var(--line);text-align:center;font-size:13px}
+  thead th{background:var(--accent-soft);padding:8px 0;font-weight:600}
+  thead th.sun{color:var(--sun)} thead th.sat{color:var(--sat)}
+  thead th.sum{background:#f8fafc;color:var(--muted);font-size:11px;width:78px}
+  td.day{height:64px;vertical-align:top;padding:4px;position:relative}
+  td.day.other{background:#fafbfc}
+  td.day .dnum{font-size:12px;color:var(--muted);position:absolute;top:4px;left:6px}
+  td.day.sun .dnum{color:var(--sun)} td.day.sat .dnum{color:var(--sat)}
+  td.day input{width:48px;margin-top:24px;text-align:center;font-size:15px;border:1px solid var(--line);
+    border-radius:6px;padding:3px 2px;color:var(--accent);font-weight:600}
+  td.day input::placeholder{color:#cbd5e1;font-weight:400}
+  td.sumcell{background:#fcfdff;font-size:12px;padding:2px}
+  td.sumcell .v{font-size:13px;font-weight:600;color:var(--ink)}
+  td.sumcell.holiday .v{color:var(--good)}
+  td.sumcell.pay .v{color:var(--accent)}
+  td.sumcell.net .v{color:var(--good);font-size:14px}
+  td.sumcell.tax .v{color:var(--warn)}
+  tr.weekrow td.day{background:linear-gradient(#fff,#fff)}
+  .total{margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:16px 20px;display:flex;flex-wrap:wrap;gap:24px;align-items:center}
+  .total .big{font-size:26px;font-weight:700;color:var(--accent)}
+  .total .lab{font-size:12px;color:var(--muted)}
+  .total .item{display:flex;flex-direction:column}
+  .hint{font-size:12px;color:var(--muted);margin:10px 2px 0}
+  td.day input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+  #printHeader{display:none}
+  #sumTable td{padding:10px 8px;font-size:14px}
+  #sumTable td.name{text-align:left;padding-left:12px;font-weight:600}
+  #sumTable td.money{font-weight:600}
+  #sumTable td.net{color:var(--good);font-weight:700}
+  #sumTable tfoot td{background:var(--accent-soft);font-weight:700;font-size:15px;border-top:2px solid var(--accent)}
+  #sumTable tfoot td.net{color:var(--accent)}
+  #sumTable tbody tr:hover{background:#f8fafc}
+  #printHeader h2{margin:0 0 4px;font-size:22px}
+  #printHeader #phMeta{font-size:13px;color:#374151;margin-bottom:8px}
+  @media print{
+    header,.tabs,.hint,.monthbar{display:none!important}
+    body{background:#fff}
+    .wrap{max-width:100%;padding:0}
+    #printHeader{display:block}
+    .cal{border:none;border-radius:0}
+    .total{border:1px solid #999;page-break-inside:avoid}
+    td.day input{border:none;background:transparent;-moz-appearance:textfield;color:#000;font-weight:600}
+    td.day input::-webkit-outer-spin-button,td.day input::-webkit-inner-spin-button{-webkit-appearance:none}
+    td.sumcell .v{color:#000!important}
+    @page{margin:12mm}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>💰 직원 급여관리</h1>
+  <div class="settings">
+    <label class="field">주휴 기준 (주 시간 ≥)
+      <input id="thresh" type="number" step="1" value="16">
+    </label>
+    <button class="btn solid" id="exportBtn" title="모든 입력 내용을 파일로 저장">⬇ 백업 저장</button>
+    <button class="btn" id="importBtn" title="저장한 백업 파일 불러오기">⬆ 불러오기</button>
+    <button class="btn" id="pdfBtn" title="이 달 급여 내역을 PDF로 저장">📄 PDF 저장</button>
+    <button class="btn" id="inviteBtn" title="이 작업공간 링크를 복사해 함께 수정할 사람에게 전달" style="display:none">🔗 초대 링크 복사</button>
+    <span id="syncStatus" style="font-size:12px;color:var(--muted)"></span>
+    <input id="importFile" type="file" accept=".json" style="display:none">
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="printHeader">
+    <h2 id="phTitle">급여 내역서</h2>
+    <div id="phMeta"></div>
+  </div>
+  <div class="tabs" id="tabs"></div>
+
+  <div class="monthbar">
+    <button class="nav" id="prev">‹</button>
+    <h2 id="monthLabel"></h2>
+    <button class="nav" id="next">›</button>
+    <input class="empname" id="empName" placeholder="직원 이름">
+    <label class="field" id="wageField">시급 (원)
+      <input id="wage" type="number" step="10" value="10030">
+    </label>
+    <label class="field" id="taxField">세율 (%)
+      <input id="taxrate" type="number" step="0.1" value="3.3">
+    </label>
+  </div>
+
+  <div class="cal">
+    <table>
+      <thead>
+        <tr>
+          <th class="sun">일</th><th>월</th><th>화</th><th>수</th><th>목</th><th>금</th><th class="sat">토</th>
+          <th class="sum">근무</th><th class="sum">주휴</th><th class="sum">급여</th><th class="sum">세금</th><th class="sum">실수령</th>
+        </tr>
+      </thead>
+      <tbody id="calBody"></tbody>
+    </table>
+  </div>
+
+  <div class="total">
+    <div class="item"><span class="lab">총 근무시간</span><span class="big" id="tHours">0</span></div>
+    <div class="item"><span class="lab">총 주휴시간</span><span class="big" id="tHoliday" style="color:var(--good)">0</span></div>
+    <div class="item"><span class="lab">총 급여</span><span class="big" id="tPay">0원</span></div>
+    <div class="item"><span class="lab">총 세금 (3.3%)</span><span class="big" id="tTax" style="color:var(--warn)">0원</span></div>
+    <div class="item"><span class="lab">월 실수령액</span><span class="big" id="tNet" style="color:var(--good)">0원</span></div>
+  </div>
+  <p class="hint" id="calHint">· 날짜 칸에 그날 근무한 시간(예: 4.5)을 입력하면 자동 계산됩니다. · 주휴수당 = 주간 근무시간 ÷ 5 (주 기준시간 이상 근무 시). · 입력값은 이 브라우저에 자동 저장됩니다.</p>
+
+  <div id="summarySection" style="display:none">
+    <div class="cal">
+      <table id="sumTable">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding-left:12px">직원</th>
+            <th class="sum">시급</th><th class="sum">근무시간</th><th class="sum">주휴시간</th>
+            <th class="sum">급여</th><th class="sum">세금</th><th class="sum">실수령액</th>
+          </tr>
+        </thead>
+        <tbody id="sumBody"></tbody>
+        <tfoot id="sumFoot"></tfoot>
+      </table>
+    </div>
+    <p class="hint">· 위 표는 선택한 달(<span id="sumMonthLabel"></span>) 기준 직원별 급여와 전체 합계입니다. · 달을 바꾸려면 상단 화살표를 누르세요.</p>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+/* ===== Firebase 설정: 아래 따옴표 안 값을 본인 Firebase 값으로 교체하세요 =====
+   값을 넣기 전에는 자동으로 "이 기기에만 저장" 모드로 동작합니다(실시간 공유 꺼짐). */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD6oQgIJ5yK3eXNKP89dP-H9HuJv6shu_A",
+  authDomain: "compose-cafe-chodang-salary.firebaseapp.com",
+  databaseURL: "https://compose-cafe-chodang-salary-default-rtdb.firebaseio.com",
+  projectId: "compose-cafe-chodang-salary",
+  storageBucket: "compose-cafe-chodang-salary.firebasestorage.app",
+  messagingSenderId: "346930465381",
+  appId: "1:346930465381:web:c184540e01e6a8c37a948c"
+};
+/* ============================================================================ */
+
+const KRW = n => Math.round(n).toLocaleString('ko-KR')+'원';
+const $ = id => document.getElementById(id);
+const LS = 'payroll_v1';
+
+const DEF_WAGE=10030, DEF_TAX=3.3;
+
+let state = load();
+function load(){
+  let s=null;
+  try{ s = JSON.parse(localStorage.getItem(LS)); }catch(e){}
+  const now = new Date();
+  if(!s||!s.employees){
+    s = { thresh:16, year:now.getFullYear(), month:now.getMonth(), active:0,
+          employees:[{name:'직원1', wage:DEF_WAGE, taxrate:DEF_TAX, hours:{}}] };
+  }
+  return migrate(s);
+}
+function migrate(s){
+  if(s.thresh==null) s.thresh=16;
+  if(s.active==null) s.active=0;
+  s.employees.forEach(e=>{
+    if(e.wage==null) e.wage = (s.wage!=null? s.wage : DEF_WAGE);
+    if(e.taxrate==null) e.taxrate = (s.taxrate!=null? s.taxrate : DEF_TAX);
+    if(!e.hours) e.hours={};
+  });
+  delete s.wage; delete s.taxrate;
+  return s;
+}
+function save(){ localStorage.setItem(LS, JSON.stringify(state)); pushCloud(); }
+
+/* ===== 실시간 공유 (Firebase) ===== */
+let db=null, roomId=getRoomId(), lastSync='', pushTimer=null;
+
+function getRoomId(){
+  const m=location.hash.match(/room=([A-Za-z0-9_-]+)/);
+  if(m) return m[1];
+  const id=Math.random().toString(36).slice(2,8)+Math.random().toString(36).slice(2,8);
+  history.replaceState(null,'','#room='+id);
+  return id;
+}
+function configReady(){
+  return FIREBASE_CONFIG.databaseURL && !FIREBASE_CONFIG.databaseURL.includes('여기에');
+}
+function setSync(txt,color){ const el=$('syncStatus'); el.textContent=txt; el.style.color=color||'var(--muted)'; }
+
+function initFirebase(){
+  if(!configReady()){ setSync('● 이 기기에만 저장','var(--muted)'); return; }
+  try{
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db=firebase.database();
+    $('inviteBtn').style.display='';
+    setSync('● 연결 중…','var(--warn)');
+    const ref=db.ref('rooms/'+roomId);
+    ref.on('value',snap=>{
+      const v=snap.val();
+      if(v){
+        const js=JSON.stringify(v);
+        if(js!==lastSync){ lastSync=js; state=migrate(v); $('thresh').value=state.thresh; renderKeepFocus(); }
+      }else{
+        pushCloud(true); // 빈 방이면 현재 내용으로 시작
+      }
+      setSync('● 실시간 공유 중','var(--good)');
+    },err=>{ setSync('● 연결 오류 (설정/규칙 확인)','var(--sun)'); });
+  }catch(e){ setSync('● 연결 실패','var(--sun)'); }
+}
+function pushCloud(now){
+  if(!db) return;
+  clearTimeout(pushTimer);
+  const doPush=()=>{ lastSync=JSON.stringify(state); db.ref('rooms/'+roomId).set(state); };
+  if(now) doPush(); else pushTimer=setTimeout(doPush,400);
+}
+function renderKeepFocus(){
+  const a=document.activeElement;
+  const k=(a&&a.dataset)?a.dataset.k:null;
+  const pos=(a&&a.selectionStart!=null)?a.selectionStart:null;
+  render();
+  if(k){
+    const el=document.querySelector('td.day input[data-k="'+k+'"]');
+    if(el){ el.focus(); if(pos!=null){ try{ el.setSelectionRange(pos,pos); }catch(e){} } }
+  }
+}
+
+// global setting: 주휴 기준
+$('thresh').value=state.thresh;
+$('thresh').addEventListener('input',()=>{ state.thresh=parseFloat($('thresh').value)||0; save(); recalc(); });
+
+// per-employee settings: 시급 / 세율
+$('wage').addEventListener('input',()=>{
+  state.employees[state.active].wage=parseFloat($('wage').value)||0; save(); recalc();
+});
+$('taxrate').addEventListener('input',()=>{
+  state.employees[state.active].taxrate=parseFloat($('taxrate').value)||0; save(); recalc();
+});
+
+$('prev').onclick=()=>{ state.month--; if(state.month<0){state.month=11;state.year--;} save(); render(); };
+$('next').onclick=()=>{ state.month++; if(state.month>11){state.month=0;state.year++;} save(); render(); };
+
+$('empName').addEventListener('input',()=>{
+  state.employees[state.active].name = $('empName').value;
+  save(); renderTabs();
+});
+
+function key(y,m,d){ return y+'-'+(m+1)+'-'+d; }
+
+let summaryMode=false;
+
+function renderTabs(){
+  const t=$('tabs'); t.innerHTML='';
+  state.employees.forEach((e,i)=>{
+    const el=document.createElement('div');
+    el.className='tab'+((!summaryMode&&i===state.active)?' active':'');
+    el.innerHTML = `<span>${e.name||'(이름없음)'}</span>` +
+      (state.employees.length>1?` <span class="del" title="삭제">✕</span>`:'');
+    el.querySelector('span').onclick=()=>{ summaryMode=false; state.active=i; save(); render(); };
+    const del=el.querySelector('.del');
+    if(del) del.onclick=(ev)=>{ev.stopPropagation();
+      if(confirm(`'${e.name}' 직원을 삭제할까요?`)){
+        state.employees.splice(i,1);
+        if(state.active>=state.employees.length) state.active=state.employees.length-1;
+        save(); render();
+      }
+    };
+    t.appendChild(el);
+  });
+  const add=document.createElement('div');
+  add.className='btn'; add.textContent='+ 직원 추가';
+  add.onclick=()=>{ summaryMode=false; state.employees.push({name:'직원'+(state.employees.length+1),wage:DEF_WAGE,taxrate:DEF_TAX,hours:{}});
+    state.active=state.employees.length-1; save(); render(); };
+  t.appendChild(add);
+  const sum=document.createElement('div');
+  sum.className='tab'+(summaryMode?' active':'');
+  sum.style.marginLeft='8px';
+  sum.innerHTML='<span>📊 월급 정산</span>';
+  sum.onclick=()=>{ summaryMode=true; render(); };
+  t.appendChild(sum);
+}
+
+function computeMonth(emp,y,m){
+  const first=new Date(y,m,1);
+  const start=new Date(y,m,1-first.getDay());
+  let cur=new Date(start);
+  let H=0,Hol=0,Pay=0,Tax=0,Net=0;
+  for(let w=0;w<6;w++){
+    let weekHours=0, anyInMonth=false;
+    for(let d=0;d<7;d++){
+      const dt=new Date(cur);
+      if(dt.getMonth()===m){
+        anyInMonth=true;
+        const k=key(dt.getFullYear(),dt.getMonth(),dt.getDate());
+        weekHours += parseFloat(emp.hours[k])||0;
+      }
+      cur.setDate(cur.getDate()+1);
+    }
+    if(!anyInMonth) continue;
+    const hol=weekHours>=state.thresh?weekHours/5:0;
+    const pay=(weekHours+hol)*emp.wage;
+    const tax=Math.floor(pay*(emp.taxrate/100)/10)*10;
+    H+=weekHours; Hol+=hol; Pay+=pay; Tax+=tax; Net+=pay-tax;
+  }
+  return {hours:H,holiday:Hol,pay:Pay,tax:Tax,net:Net};
+}
+
+function renderSummary(){
+  const y=state.year,m=state.month;
+  $('sumMonthLabel').textContent=`${y}년 ${m+1}월`;
+  $('phTitle').textContent=`${y}년 ${m+1}월 월급 정산`;
+  $('phMeta').textContent=`직원별 급여 및 전체 합계  ·  주휴 기준: 주 ${state.thresh}시간 이상`;
+  const tb=$('sumBody'); tb.innerHTML='';
+  let T={hours:0,holiday:0,pay:0,tax:0,net:0};
+  state.employees.forEach(e=>{
+    const r=computeMonth(e,y,m);
+    T.hours+=r.hours; T.holiday+=r.holiday; T.pay+=r.pay; T.tax+=r.tax; T.net+=r.net;
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td class="name">${e.name||'-'}</td>`+
+      `<td>${KRW(e.wage)}</td>`+
+      `<td>${r.hours?Math.round(r.hours*10)/10:'–'}</td>`+
+      `<td>${r.holiday?r.holiday.toFixed(1):'–'}</td>`+
+      `<td class="money">${r.pay?KRW(r.pay):'–'}</td>`+
+      `<td class="money">${r.tax?KRW(r.tax):'–'}</td>`+
+      `<td class="money net">${r.net?KRW(r.net):'–'}</td>`;
+    tb.appendChild(tr);
+  });
+  $('sumFoot').innerHTML=`<tr>`+
+    `<td class="name">전체 합계 (${state.employees.length}명)</td>`+
+    `<td>–</td>`+
+    `<td>${Math.round(T.hours*10)/10}</td>`+
+    `<td>${(Math.round(T.holiday*10)/10)}</td>`+
+    `<td class="money">${KRW(T.pay)}</td>`+
+    `<td class="money">${KRW(T.tax)}</td>`+
+    `<td class="money net">${KRW(T.net)}</td></tr>`;
+}
+
+function render(){
+  renderTabs();
+  const y0=state.year, m0=state.month;
+  $('monthLabel').textContent = `${y0}년 ${m0+1}월`;
+  const calOn = !summaryMode;
+  ['empName','wageField','taxField'].forEach(id=>$(id).style.display=calOn?'':'none');
+  $('summarySection').style.display=calOn?'none':'block';
+  document.querySelector('.cal').style.display=calOn?'':'none';
+  document.querySelector('.total').style.display=calOn?'':'none';
+  $('calHint').style.display=calOn?'':'none';
+  if(summaryMode){ renderSummary(); return; }
+  const emp = state.employees[state.active];
+  $('empName').value = emp.name;
+  $('wage').value = emp.wage;
+  $('taxrate').value = emp.taxrate;
+  const y=state.year, m=state.month;
+  $('monthLabel').textContent = `${y}년 ${m+1}월`;
+  $('phTitle').textContent = `${y}년 ${m+1}월 급여 내역서`;
+  $('phMeta').textContent = `직원: ${emp.name||'-'}  ·  시급: ${KRW(emp.wage)}  ·  세율: ${emp.taxrate}%  ·  주휴 기준: 주 ${state.thresh}시간 이상`;
+
+  const first=new Date(y,m,1);
+  const start=new Date(y,m,1-first.getDay()); // back to Sunday
+  const body=$('calBody'); body.innerHTML='';
+
+  let cur=new Date(start);
+  for(let w=0; w<6; w++){
+    const tr=document.createElement('tr'); tr.className='weekrow';
+    let anyInMonth=false;
+    for(let d=0; d<7; d++){
+      const dt=new Date(cur);
+      const inMonth = dt.getMonth()===m;
+      if(inMonth) anyInMonth=true;
+      const td=document.createElement('td');
+      td.className='day'+(d===0?' sun':d===6?' sat':'')+(inMonth?'':' other');
+      const k=key(dt.getFullYear(),dt.getMonth(),dt.getDate());
+      td.innerHTML=`<span class="dnum">${dt.getDate()}</span>`;
+      if(inMonth){
+        const inp=document.createElement('input');
+        inp.type='number'; inp.step='0.5'; inp.min='0'; inp.placeholder='-';
+        inp.value = emp.hours[k]!=null ? emp.hours[k] : '';
+        inp.dataset.k=k;
+        inp.addEventListener('input',()=>{
+          const v=parseFloat(inp.value);
+          if(inp.value===''||isNaN(v)) delete emp.hours[k]; else emp.hours[k]=v;
+          save(); recalc();
+        });
+        td.appendChild(inp);
+      }
+      tr.appendChild(td);
+      cur.setDate(cur.getDate()+1);
+    }
+    const sumCells={};
+    ['work','holiday','pay','tax','net'].forEach(c=>{
+      const td=document.createElement('td');
+      td.className='sumcell '+c;
+      const span=document.createElement('span'); span.className='v';
+      td.appendChild(span); sumCells[c]=span; tr.appendChild(td);
+    });
+    tr._sumCells=sumCells;
+    if(anyInMonth) body.appendChild(tr);
+  }
+  recalc();
+}
+
+function recalc(){
+  const emp = state.employees[state.active];
+  let totH=0,totHol=0,totPay=0,totTax=0,totNet=0;
+  document.querySelectorAll('#calBody tr.weekrow').forEach(tr=>{
+    let weekHours=0;
+    tr.querySelectorAll('td.day input').forEach(inp=>{ weekHours += parseFloat(inp.value)||0; });
+    const hol = weekHours>=state.thresh ? weekHours/5 : 0;
+    const pay = (weekHours+hol)*emp.wage;
+    const tax = Math.floor(pay*(emp.taxrate/100)/10)*10;
+    const net = pay-tax;
+    const s=tr._sumCells;
+    s.work.textContent    = weekHours? (Math.round(weekHours*10)/10) : '–';
+    s.holiday.textContent = hol? hol.toFixed(1) : '–';
+    s.pay.textContent     = pay? KRW(pay):'–';
+    s.tax.textContent     = tax? KRW(tax):'–';
+    s.net.textContent     = net? KRW(net):'–';
+    totH+=weekHours; totHol+=hol; totPay+=pay; totTax+=tax; totNet+=net;
+  });
+  $('tHours').textContent = (Math.round(totH*10)/10);
+  $('tHoliday').textContent = (Math.round(totHol*10)/10);
+  $('tPay').textContent = KRW(totPay);
+  $('tTax').textContent = KRW(totTax);
+  $('tNet').textContent = KRW(totNet);
+}
+
+$('exportBtn').onclick=()=>{
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const today=new Date().toISOString().slice(0,10);
+  a.href=url; a.download=`급여관리_백업_${today}.json`;
+  a.click(); URL.revokeObjectURL(url);
+};
+$('pdfBtn').onclick=()=>window.print();
+$('inviteBtn').onclick=async()=>{
+  const link=location.origin+location.pathname+'#room='+roomId;
+  let copied=false;
+  try{ await navigator.clipboard.writeText(link); copied=true; }catch(e){}
+  if(copied) alert('초대 링크가 복사되었습니다!\n\n이 링크를 받은 사람은 같은 자료를 실시간으로 함께 보고 수정할 수 있습니다.\n카카오톡·문자에 붙여넣어 전달하세요.');
+  else prompt('아래 링크를 복사해 함께 수정할 사람에게 보내세요:', link);
+};
+$('importBtn').onclick=()=>$('importFile').click();
+$('importFile').onchange=(e)=>{
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const s=JSON.parse(r.result);
+      if(!s||!s.employees) throw new Error('형식 오류');
+      if(!confirm('불러오면 현재 입력 내용을 덮어씁니다. 계속할까요?')) return;
+      s.employees.forEach(e=>{ if(e.wage==null)e.wage=DEF_WAGE; if(e.taxrate==null)e.taxrate=DEF_TAX; });
+      if(s.thresh==null) s.thresh=16;
+      delete s.wage; delete s.taxrate;
+      state=s; save();
+      $('thresh').value=state.thresh;
+      render();
+      alert('불러오기 완료!');
+    }catch(err){ alert('올바른 백업 파일이 아닙니다.'); }
+    $('importFile').value='';
+  };
+  r.readAsText(f);
+};
+
+render();
+initFirebase();
+</script>
+</body>
+</html>
