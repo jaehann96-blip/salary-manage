@@ -87,6 +87,12 @@
   .groupbox{flex-basis:100%;display:flex;gap:8px;flex-wrap:wrap;align-items:center;
     padding:10px 0 10px 14px;margin-left:6px;border-left:2px solid var(--accent)}
   .groupempty{font-size:13px;color:var(--muted);padding:0 6px}
+  .viewfilter{flex-basis:100%;display:flex;margin-bottom:4px}
+  .viewfilter .vf{padding:6px 18px;border:1px solid var(--line);background:var(--card);
+    cursor:pointer;font-size:13px;font-weight:700;color:var(--muted)}
+  .viewfilter .vf:first-child{border-radius:8px 0 0 8px}
+  .viewfilter .vf:last-child{border-radius:0 8px 8px 0;border-left:none}
+  .viewfilter .vf.on{background:var(--accent);color:#fff;border-color:var(--accent)}
   #printHeader h2{margin:0 0 4px;font-size:22px}
   #printHeader #phMeta{font-size:13px;color:#374151;margin-bottom:8px}
   @media (max-width:640px){
@@ -176,6 +182,7 @@
       <input id="empGroup" list="groupList" placeholder="예: 카페">
     </label>
     <datalist id="groupList"></datalist>
+    <button class="btn" id="retireBtn">퇴직 처리</button>
   </div>
 
   <div class="cal">
@@ -264,6 +271,7 @@ function migrate(s){
     if(e.taxrate==null) e.taxrate = (s.taxrate!=null? s.taxrate : DEF_TAX);
     if(!e.hours) e.hours={};
     if(!e.group) e.group='카페';
+    if(e.retired==null) e.retired=false;
   });
   if(!Array.isArray(s.groups)){
     s.groups=[...new Set(s.employees.map(e=>e.group||'카페'))];
@@ -348,6 +356,12 @@ $('empGroup').addEventListener('input',()=>{
 function refreshGroupList(){
   $('groupList').innerHTML=state.groups.map(g=>`<option value="${g}">`).join('');
 }
+$('retireBtn').onclick=()=>{
+  const emp=state.employees[state.active];
+  emp.retired=!emp.retired;
+  viewRetired=!!emp.retired; // 상태 바뀐 직원을 따라 화면 전환
+  save(); render();
+};
 
 $('prev').onclick=()=>{ state.month--; if(state.month<0){state.month=11;state.year--;} save(); render(); };
 $('next').onclick=()=>{ state.month++; if(state.month>11){state.month=0;state.year++;} save(); render(); };
@@ -391,11 +405,29 @@ function deleteGroup(g){
   save(); render();
 }
 
+let viewRetired=false;
+function setView(r){
+  viewRetired=r;
+  const idx=state.employees.findIndex(e=>!!e.retired===r);
+  if(idx>=0) state.active=idx;
+  render();
+}
 function renderTabs(){
   const t=$('tabs'); t.innerHTML='';
+  const filter=document.createElement('div');
+  filter.className='viewfilter';
+  const nAct=state.employees.filter(e=>!e.retired).length;
+  const nRet=state.employees.filter(e=>e.retired).length;
+  filter.innerHTML=`<button class="vf${!viewRetired?' on':''}">재직자 ${nAct}</button>`+
+                   `<button class="vf${viewRetired?' on':''}">퇴직자 ${nRet}</button>`;
+  const vfb=filter.querySelectorAll('.vf');
+  vfb[0].onclick=()=>setView(false);
+  vfb[1].onclick=()=>setView(true);
+  t.appendChild(filter);
   state.groups.forEach(g=>{
     const members=[];
-    state.employees.forEach((e,i)=>{ if((e.group||'카페')===g) members.push(i); });
+    state.employees.forEach((e,i)=>{ if((e.group||'카페')===g && !!e.retired===viewRetired) members.push(i); });
+    if(viewRetired && members.length===0) return;
     const open = openGroup===g;
     const head=document.createElement('div');
     head.className='groupchip'+(open?' open':'');
@@ -436,12 +468,14 @@ function renderTabs(){
         empty.className='groupempty'; empty.textContent='(직원 없음)';
         box.appendChild(empty);
       }
-      const add=document.createElement('div');
-      add.className='btn'; add.textContent='+ 직원 추가';
-      add.onclick=()=>{ summaryMode=false;
-        state.employees.push({name:'직원'+(state.employees.length+1),wage:DEF_WAGE,taxrate:DEF_TAX,group:g,hours:{}});
-        state.active=state.employees.length-1; openGroup=g; save(); render(); };
-      box.appendChild(add);
+      if(!viewRetired){
+        const add=document.createElement('div');
+        add.className='btn'; add.textContent='+ 직원 추가';
+        add.onclick=()=>{ summaryMode=false;
+          state.employees.push({name:'직원'+(state.employees.length+1),wage:DEF_WAGE,taxrate:DEF_TAX,group:g,retired:false,hours:{}});
+          state.active=state.employees.length-1; openGroup=g; save(); render(); };
+        box.appendChild(add);
+      }
       t.appendChild(box);
     }
   });
@@ -486,8 +520,9 @@ function computeMonth(emp,y,m){
 function renderSummary(){
   const y=state.year,m=state.month;
   $('sumMonthLabel').textContent=`${y}년 ${m+1}월`;
-  $('phTitle').textContent=`${y}년 ${m+1}월 월급 정산`;
-  $('phMeta').textContent=`직원별 급여 및 전체 합계  ·  주휴 기준: 주 ${state.thresh}시간 이상`;
+  const viewLabel=viewRetired?'퇴직자':'재직자';
+  $('phTitle').textContent=`${y}년 ${m+1}월 월급 정산 (${viewLabel})`;
+  $('phMeta').textContent=`${viewLabel} 급여 및 전체 합계  ·  주휴 기준: 주 ${state.thresh}시간 이상`;
   const tb=$('sumBody'); tb.innerHTML='';
   const hh=v=>Math.round(v*10)/10;
   const empRow=(name,wage,r,cls)=>`<tr class="${cls||''}">`+
@@ -500,7 +535,7 @@ function renderSummary(){
     `<td class="money net">${r.net?KRW(r.net):'–'}</td></tr>`;
   let G={hours:0,holiday:0,pay:0,tax:0,net:0}, totalCount=0;
   groupOrder().forEach(g=>{
-    const members=state.employees.filter(e=>(e.group||'카페')===g);
+    const members=state.employees.filter(e=>(e.group||'카페')===g && !!e.retired===viewRetired);
     if(members.length===0) return;
     tb.insertAdjacentHTML('beforeend',`<tr class="grouphead"><td colspan="7">📁 ${g} (${members.length}명)</td></tr>`);
     let S={hours:0,holiday:0,pay:0,tax:0,net:0};
@@ -527,7 +562,7 @@ function render(){
   const y0=state.year, m0=state.month;
   $('monthLabel').textContent = `${y0}년 ${m0+1}월`;
   const calOn = !summaryMode;
-  ['empName','wageField','taxField','groupField'].forEach(id=>$(id).style.display=calOn?'':'none');
+  ['empName','wageField','taxField','groupField','retireBtn'].forEach(id=>$(id).style.display=calOn?'':'none');
   $('summarySection').style.display=calOn?'none':'block';
   document.querySelector('.cal').style.display=calOn?'':'none';
   document.querySelector('.total').style.display=calOn?'':'none';
@@ -539,10 +574,11 @@ function render(){
   $('wage').value = emp.wage;
   $('taxrate').value = emp.taxrate;
   $('empGroup').value = emp.group||'카페';
+  $('retireBtn').textContent = emp.retired?'복직 처리':'퇴직 처리';
   const y=state.year, m=state.month;
   $('monthLabel').textContent = `${y}년 ${m+1}월`;
   $('phTitle').textContent = `${y}년 ${m+1}월 급여명세서`;
-  $('phMeta').textContent = `소속: ${emp.group||'카페'}  ·  직원: ${emp.name||'-'}  ·  시급: ${KRW(emp.wage)}  ·  세율: ${emp.taxrate}%  ·  주휴 기준: 주 ${state.thresh}시간 이상`;
+  $('phMeta').textContent = `소속: ${emp.group||'카페'}  ·  직원: ${emp.name||'-'}${emp.retired?' (퇴직)':''}  ·  시급: ${KRW(emp.wage)}  ·  세율: ${emp.taxrate}%  ·  주휴 기준: 주 ${state.thresh}시간 이상`;
 
   const first=new Date(y,m,1);
   const start=new Date(y,m,1-first.getDay()); // back to Sunday
