@@ -723,7 +723,8 @@ function renderSummary(){
     const members=state.employees
       .filter(e=>(e.group||'카페')===g)
       .map(e=>({e, r:computeMonth(e,y,m)}))
-      .filter(x=>x.r.hours>0);
+      .filter(x=>x.r.hours>0)
+      .sort((a,b)=>b.r.pay-a.r.pay); // 급여 많은 순
     if(members.length===0) return;
     tb.insertAdjacentHTML('beforeend',`<tr class="grouphead"><td colspan="7">📁 ${g} (${members.length}명)</td></tr>`);
     let S={hours:0,holiday:0,pay:0,tax:0,net:0};
