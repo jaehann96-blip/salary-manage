@@ -130,6 +130,13 @@
   .modal-box label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px;font-weight:600}
   .modal-box input{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:15px}
   .modal-btns{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
+  .acc-sec{display:flex;flex-direction:column;gap:6px}
+  .acc-title{font-size:13px;font-weight:700;color:var(--muted)}
+  .acc-row{display:flex;justify-content:space-between;align-items:center;gap:10px;
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px}
+  .acc-row small{color:var(--muted)}
+  .acc-row .btn{padding:4px 10px;font-size:12px}
+  .acc-empty{font-size:13px;color:var(--muted);padding:4px 2px}
   /* ===== 기간 합산 인쇄 영역 ===== */
   #periodPrint{display:none;color:#000}
   #periodPrint .phdr h2{text-align:center;font-size:22px;margin:0 0 4px}
@@ -193,6 +200,12 @@
     <button class="btn" id="importBtn" title="저장한 백업 파일 불러오기">⬆ 불러오기</button>
     <button class="btn" id="pdfBtn" title="이 달 급여 내역을 PDF로 저장">📄 PDF 저장</button>
     <button class="btn" id="inviteBtn" title="이 작업공간 링크를 복사해 함께 수정할 사람에게 전달" style="display:none">🔗 초대 링크 복사</button>
+    <button class="btn solid" id="accessBtn" title="수정 권한 관리" style="display:none">🔐 접근 관리</button>
+    <button class="btn" id="reqBtn" title="관리자에게 수정 권한 요청" style="display:none">✋ 접근 요청</button>
+    <button class="btn solid" id="loginBtn" style="display:none">🔓 구글 로그인</button>
+    <span id="userBox" style="display:none;font-size:12px;color:var(--muted)">
+      <span id="userEmail"></span> <button class="btn" id="logoutBtn" style="padding:3px 8px;font-size:12px">로그아웃</button>
+    </span>
     <span id="syncStatus" style="font-size:12px;color:var(--muted)"></span>
     <input id="importFile" type="file" accept=".json" style="display:none">
   </div>
@@ -283,8 +296,26 @@
   </div>
 </div>
 
+<div id="accessDialog" class="modal">
+  <div class="modal-box" style="width:min(94vw,440px)">
+    <h3>🔐 접근 권한 관리</h3>
+    <div class="acc-sec">
+      <div class="acc-title">승인 대기 중인 요청</div>
+      <div id="reqList"></div>
+    </div>
+    <div class="acc-sec">
+      <div class="acc-title">수정 권한이 있는 사람</div>
+      <div id="allowList"></div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn solid" id="accessClose">닫기</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script>
 /* ===== Firebase 설정: 아래 따옴표 안 값을 본인 Firebase 값으로 교체하세요 =====
    값을 넣기 전에는 자동으로 "이 기기에만 저장" 모드로 동작합니다(실시간 공유 꺼짐). */
@@ -335,10 +366,12 @@ function migrate(s){
   delete s.wage; delete s.taxrate;
   return s;
 }
-function save(){ localStorage.setItem(LS, JSON.stringify(state)); pushCloud(); }
+function save(){ localStorage.setItem(LS, JSON.stringify(state)); if(canEdit) pushCloud(); }
 
-/* ===== 실시간 공유 (Firebase) ===== */
-let db=null, roomId=getRoomId(), lastSync='', pushTimer=null;
+/* ===== 실시간 공유 + 접근 권한 (Firebase) ===== */
+let db=null, auth=null, roomId=getRoomId(), lastSync='', pushTimer=null;
+let authUser=null, roomOwner=null, allowMap={}, reqMap={}, remoteHasData=false;
+let canEdit=true, isOwner=false;
 
 function getRoomId(){
   const m=location.hash.match(/room=([A-Za-z0-9_-]+)/);
@@ -353,31 +386,127 @@ function configReady(){
 function setSync(txt,color){ const el=$('syncStatus'); el.textContent=txt; el.style.color=color||'var(--muted)'; }
 
 function initFirebase(){
-  if(!configReady()){ setSync('● 이 기기에만 저장','var(--muted)'); return; }
+  if(!configReady()){ setSync('● 이 기기에만 저장','var(--muted)'); applyPermissionUI(); return; }
   try{
     firebase.initializeApp(FIREBASE_CONFIG);
     db=firebase.database();
-    $('inviteBtn').style.display='';
-    setSync('● 연결 중…','var(--warn)');
-    const ref=db.ref('rooms/'+roomId);
-    ref.on('value',snap=>{
-      const v=snap.val();
-      if(v){
-        const js=JSON.stringify(v);
-        if(js!==lastSync){ lastSync=js; state=migrate(v); $('thresh').value=state.thresh; renderKeepFocus(); }
+    auth=firebase.auth();
+    canEdit=false;
+    setSync('● 로그인이 필요합니다','var(--warn)');
+    auth.onAuthStateChanged(u=>{
+      authUser=u;
+      updateAuthUI();
+      if(u){
+        if(!roomListening){ roomListening=true; listenRoom(); }
+        claimOwnerIfEmpty();
       }else{
-        pushCloud(true); // 빈 방이면 현재 내용으로 시작
+        if(roomListening){ db.ref('rooms/'+roomId).off(); roomListening=false; }
+        roomOwner=null; allowMap={}; reqMap={};
       }
-      setSync('● 실시간 공유 중','var(--good)');
-    },err=>{ setSync('● 연결 오류 (설정/규칙 확인)','var(--sun)'); });
+      evalPermission();
+    });
+    applyPermissionUI();
   }catch(e){ setSync('● 연결 실패','var(--sun)'); }
 }
+let roomListening=false;
+
+function listenRoom(){
+  db.ref('rooms/'+roomId).on('value',snap=>{
+    const v=snap.val()||{};
+    roomOwner = v.owner || null;
+    allowMap  = v.allow || {};
+    reqMap    = v.requests || {};
+    let data=null;
+    if(v.state && v.state.employees) data=v.state;       // 신버전
+    else if(v.employees) data=v;                          // 구버전 호환
+    remoteHasData = !!data;
+    if(data){
+      const js=JSON.stringify(data);
+      if(js!==lastSync){ lastSync=js; state=migrate(data); $('thresh').value=state.thresh; renderKeepFocus(); }
+    }
+    evalPermission();
+    renderAccessPanel();
+  },err=>{ setSync('● 연결 오류 (설정/규칙 확인)','var(--sun)'); });
+}
+
+function claimOwnerIfEmpty(){
+  if(!authUser) return;
+  db.ref('rooms/'+roomId+'/owner').transaction(cur=>{
+    if(cur===null) return {uid:authUser.uid, email:authUser.email, name:authUser.displayName||authUser.email};
+    return; // 이미 주인 있음 → 변경 안 함
+  });
+}
+
+function evalPermission(){
+  isOwner = !!(authUser && roomOwner && roomOwner.uid===authUser.uid);
+  const allowed = !!(authUser && allowMap[authUser.uid]);
+  canEdit = isOwner || allowed;
+  if(!authUser)      setSync('● 로그인 필요 (보기 전용)','var(--warn)');
+  else if(canEdit)   setSync('● 수정 가능'+(isOwner?' (관리자)':''),'var(--good)');
+  else               setSync('● 보기 전용 — 관리자 승인 대기','var(--sun)');
+  // 관리자가 빈 방을 열면 현재 로컬 내용으로 시작
+  if(canEdit && !remoteHasData){ pushCloud(true); remoteHasData=true; }
+  applyPermissionUI();
+}
+
+function applyPermissionUI(){
+  const ro=!canEdit;
+  ['thresh','wage','taxrate','empName','empGroup'].forEach(id=>{ if($(id)) $(id).disabled=ro; });
+  if($('retireBtn')) $('retireBtn').disabled=ro;
+  if($('importBtn')) $('importBtn').disabled=ro;
+  $('inviteBtn').style.display = (configReady()&&canEdit)?'':'none';
+  $('accessBtn').style.display = isOwner?'':'none';
+  $('reqBtn').style.display    = (authUser && !canEdit)?'':'none';
+  document.querySelectorAll('td.day input').forEach(i=>i.disabled=ro);
+  if(typeof renderTabs==='function') renderTabs();
+}
+
 function pushCloud(now){
-  if(!db) return;
+  if(!db || !canEdit) return;
   clearTimeout(pushTimer);
-  const doPush=()=>{ lastSync=JSON.stringify(state); db.ref('rooms/'+roomId).set(state); };
+  const doPush=()=>{ lastSync=JSON.stringify(state); db.ref('rooms/'+roomId+'/state').set(state); };
   if(now) doPush(); else pushTimer=setTimeout(doPush,400);
 }
+
+function updateAuthUI(){
+  if(authUser){
+    $('loginBtn').style.display='none';
+    $('userBox').style.display='';
+    $('userEmail').textContent=authUser.email;
+  }else{
+    $('loginBtn').style.display='';
+    $('userBox').style.display='none';
+  }
+}
+
+function renderAccessPanel(){
+  if(!isOwner){ return; }
+  const reqBox=$('reqList'), alBox=$('allowList');
+  if(!reqBox||!alBox) return;
+  const reqs=Object.entries(reqMap);
+  reqBox.innerHTML = reqs.length ? reqs.map(([uid,r])=>
+    `<div class="acc-row"><span>${r.name||r.email}<br><small>${r.email}</small></span>`+
+    `<span><button class="btn solid" data-approve="${uid}">승인</button> `+
+    `<button class="btn" data-deny="${uid}">거부</button></span></div>`).join('')
+    : '<div class="acc-empty">대기 중인 요청이 없습니다.</div>';
+  let rows='';
+  if(roomOwner) rows+=`<div class="acc-row"><span>${roomOwner.name||roomOwner.email} <b>(관리자)</b><br><small>${roomOwner.email}</small></span><span>—</span></div>`;
+  Object.entries(allowMap).forEach(([uid,a])=>{
+    rows+=`<div class="acc-row"><span>${a.name||a.email}<br><small>${a.email}</small></span>`+
+      `<span><button class="btn" data-remove="${uid}">권한 해제</button></span></div>`;
+  });
+  alBox.innerHTML = rows;
+  reqBox.querySelectorAll('[data-approve]').forEach(b=>b.onclick=()=>approveReq(b.dataset.approve));
+  reqBox.querySelectorAll('[data-deny]').forEach(b=>b.onclick=()=>denyReq(b.dataset.deny));
+  alBox.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>removeAllow(b.dataset.remove));
+}
+function approveReq(uid){
+  const r=reqMap[uid]; if(!r) return;
+  db.ref('rooms/'+roomId+'/allow/'+uid).set({email:r.email,name:r.name,ts:Date.now()});
+  db.ref('rooms/'+roomId+'/requests/'+uid).remove();
+}
+function denyReq(uid){ db.ref('rooms/'+roomId+'/requests/'+uid).remove(); }
+function removeAllow(uid){ if(confirm('이 사람의 수정 권한을 해제할까요?')) db.ref('rooms/'+roomId+'/allow/'+uid).remove(); }
 function renderKeepFocus(){
   const a=document.activeElement;
   const k=(a&&a.dataset)?a.dataset.k:null;
@@ -487,13 +616,14 @@ function renderTabs(){
     head.innerHTML=`<span class="gtoggle">${open?'▼':'▶'}</span>`+
       `<span class="gname">${g}</span>`+
       `<span class="gcount">${members.length}</span>`+
-      `<span class="gedit" title="그룹 이름 변경">✎</span>`+
-      `<span class="gdel" title="그룹 삭제">✕</span>`;
+      (canEdit?`<span class="gedit" title="그룹 이름 변경">✎</span><span class="gdel" title="그룹 삭제">✕</span>`:'');
     const toggle=()=>{ openGroup=open?null:g; renderTabs(); };
     head.querySelector('.gtoggle').onclick=toggle;
     head.querySelector('.gname').onclick=toggle;
-    head.querySelector('.gedit').onclick=(ev)=>{ev.stopPropagation(); renameGroup(g);};
-    head.querySelector('.gdel').onclick=(ev)=>{ev.stopPropagation(); deleteGroup(g);};
+    if(canEdit){
+      head.querySelector('.gedit').onclick=(ev)=>{ev.stopPropagation(); renameGroup(g);};
+      head.querySelector('.gdel').onclick=(ev)=>{ev.stopPropagation(); deleteGroup(g);};
+    }
     t.appendChild(head);
 
     if(open){
@@ -504,7 +634,7 @@ function renderTabs(){
         const el=document.createElement('div');
         el.className='tab'+((!summaryMode&&i===state.active)?' active':'');
         el.innerHTML = `<span>${e.name||'(이름없음)'}</span>` +
-          (state.employees.length>1?` <span class="del" title="삭제">✕</span>`:'');
+          ((canEdit&&state.employees.length>1)?` <span class="del" title="삭제">✕</span>`:'');
         el.querySelector('span').onclick=()=>{ summaryMode=false; state.active=i; openGroup=g; save(); render(); };
         const del=el.querySelector('.del');
         if(del) del.onclick=(ev)=>{ev.stopPropagation();
@@ -521,7 +651,7 @@ function renderTabs(){
         empty.className='groupempty'; empty.textContent='(직원 없음)';
         box.appendChild(empty);
       }
-      if(!viewRetired){
+      if(!viewRetired && canEdit){
         const add=document.createElement('div');
         add.className='btn'; add.textContent='+ 직원 추가';
         add.onclick=()=>{ summaryMode=false;
@@ -532,10 +662,12 @@ function renderTabs(){
       t.appendChild(box);
     }
   });
-  const addG=document.createElement('div');
-  addG.className='btn'; addG.textContent='+ 그룹 추가';
-  addG.onclick=addGroup;
-  t.appendChild(addG);
+  if(canEdit){
+    const addG=document.createElement('div');
+    addG.className='btn'; addG.textContent='+ 그룹 추가';
+    addG.onclick=addGroup;
+    t.appendChild(addG);
+  }
 
   const sum=document.createElement('div');
   sum.className='tab'+(summaryMode?' active':'');
@@ -654,6 +786,7 @@ function render(){
         inp.type='number'; inp.step='0.5'; inp.min='0'; inp.placeholder='-';
         inp.value = emp.hours[k]!=null ? emp.hours[k] : '';
         inp.dataset.k=k;
+        inp.disabled=!canEdit;
         inp.addEventListener('input',()=>{
           const v=parseFloat(inp.value);
           if(inp.value===''||isNaN(v)) delete emp.hours[k]; else emp.hours[k]=v;
@@ -809,8 +942,20 @@ $('inviteBtn').onclick=async()=>{
   const link=location.origin+location.pathname+'#room='+roomId;
   let copied=false;
   try{ await navigator.clipboard.writeText(link); copied=true; }catch(e){}
-  if(copied) alert('초대 링크가 복사되었습니다!\n\n이 링크를 받은 사람은 같은 자료를 실시간으로 함께 보고 수정할 수 있습니다.\n카카오톡·문자에 붙여넣어 전달하세요.');
-  else prompt('아래 링크를 복사해 함께 수정할 사람에게 보내세요:', link);
+  if(copied) alert('초대 링크가 복사되었습니다!\n\n이 링크를 받은 사람은 구글 로그인 후 "접근 요청"을 보낼 수 있고,\n관리자가 승인하면 함께 수정할 수 있습니다.\n카카오톡·문자에 붙여넣어 전달하세요.');
+  else prompt('아래 링크를 복사해 전달하세요:', link);
+};
+$('loginBtn').onclick=()=>{
+  const p=new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(p).catch(e=>{ alert('로그인 실패: '+e.message); });
+};
+$('logoutBtn').onclick=()=>{ if(auth) auth.signOut(); };
+$('accessBtn').onclick=()=>{ renderAccessPanel(); $('accessDialog').classList.add('on'); };
+$('accessClose').onclick=()=>$('accessDialog').classList.remove('on');
+$('reqBtn').onclick=()=>{
+  if(!authUser){ alert('먼저 구글 로그인을 해주세요.'); return; }
+  db.ref('rooms/'+roomId+'/requests/'+authUser.uid).set({email:authUser.email,name:authUser.displayName||authUser.email,ts:Date.now()});
+  alert('접근 요청을 보냈습니다.\n관리자가 승인하면 수정할 수 있습니다.');
 };
 $('importBtn').onclick=()=>$('importFile').click();
 $('importFile').onchange=(e)=>{
