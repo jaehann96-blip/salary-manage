@@ -705,9 +705,8 @@ function computeMonth(emp,y,m){
 function renderSummary(){
   const y=state.year,m=state.month;
   $('sumMonthLabel').textContent=`${y}년 ${m+1}월`;
-  const viewLabel=viewRetired?'퇴직자':'재직자';
-  $('phTitle').textContent=`${y}년 ${m+1}월 월급 정산 (${viewLabel})`;
-  $('phMeta').textContent=`${viewLabel} 급여 및 전체 합계  ·  주휴 기준: 주 ${state.thresh}시간 이상`;
+  $('phTitle').textContent=`${y}년 ${m+1}월 월급 정산`;
+  $('phMeta').textContent=`해당 월 근무자 전체 급여 및 합계  ·  주휴 기준: 주 ${state.thresh}시간 이상`;
   const tb=$('sumBody'); tb.innerHTML='';
   const hh=v=>Math.round(v*10)/10;
   const empRow=(name,wage,r,cls)=>`<tr class="${cls||''}">`+
@@ -720,14 +719,18 @@ function renderSummary(){
     `<td class="money net">${r.net?KRW(r.net):'–'}</td></tr>`;
   let G={hours:0,holiday:0,pay:0,tax:0,net:0}, totalCount=0;
   groupOrder().forEach(g=>{
-    const members=state.employees.filter(e=>(e.group||'카페')===g && !!e.retired===viewRetired);
+    // 재직/퇴직 상관없이, 해당 월에 실제 근무한 사람만 포함
+    const members=state.employees
+      .filter(e=>(e.group||'카페')===g)
+      .map(e=>({e, r:computeMonth(e,y,m)}))
+      .filter(x=>x.r.hours>0);
     if(members.length===0) return;
     tb.insertAdjacentHTML('beforeend',`<tr class="grouphead"><td colspan="7">📁 ${g} (${members.length}명)</td></tr>`);
     let S={hours:0,holiday:0,pay:0,tax:0,net:0};
-    members.forEach(e=>{
-      const r=computeMonth(e,y,m);
+    members.forEach(({e,r})=>{
       ['hours','holiday','pay','tax','net'].forEach(k=>{S[k]+=r[k];G[k]+=r[k];});
-      tb.insertAdjacentHTML('beforeend',empRow(e.name||'-',e.wage,r));
+      const nm=(e.name||'-')+(e.retired?' (퇴직)':'');
+      tb.insertAdjacentHTML('beforeend',empRow(nm,e.wage,r));
     });
     totalCount+=members.length;
     tb.insertAdjacentHTML('beforeend',empRow(`${g} 소계`,null,S,'subtotal'));
