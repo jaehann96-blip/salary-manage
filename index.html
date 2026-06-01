@@ -114,6 +114,22 @@
     #sumTable th:nth-child(4),#sumTable td:nth-child(4),
     #sumTable th:nth-child(6),#sumTable td:nth-child(6){display:none}
   }
+  /* ===== 급여명세서 ===== */
+  #payslip{display:none;color:#000;max-width:640px;margin:0 auto}
+  #payslip h1{text-align:center;font-size:26px;letter-spacing:8px;margin:0 0 6px;font-weight:800}
+  #payslip .ps-sub{text-align:center;color:#374151;margin-bottom:18px;font-size:14px}
+  #payslip table{width:100%;border-collapse:collapse;margin-bottom:16px}
+  #payslip th,#payslip td{border:1px solid #333;padding:9px 12px;font-size:14px}
+  #payslip .ps-info th{background:#f1f5f9;width:80px;text-align:left}
+  #payslip .ps-pay thead th{background:#f1f5f9;text-align:center}
+  #payslip td.amt{text-align:right;font-weight:600}
+  #payslip .ps-pay tfoot th,#payslip .ps-pay tfoot td{background:#eef2f7;font-weight:700}
+  #payslip .ps-net{display:flex;justify-content:space-between;align-items:center;
+    border:2px solid #333;padding:12px 16px;font-size:16px;margin-bottom:30px;font-weight:700}
+  #payslip .ps-net b{font-size:20px}
+  #payslip .ps-note{text-align:center;margin:24px 0 12px;font-size:14px}
+  #payslip .ps-issuer{text-align:right;font-size:17px;font-weight:700}
+  #payslip .ps-issuer .ps-seal{color:#888;font-weight:400;margin-left:4px}
   @media print{
     header,.tabs,.hint,.monthbar{display:none!important}
     body{background:#fff}
@@ -125,6 +141,12 @@
     td.day input::-webkit-outer-spin-button,td.day input::-webkit-inner-spin-button{-webkit-appearance:none}
     td.sumcell .v{color:#000!important}
     @page{margin:12mm}
+    /* 급여명세서 인쇄 모드: 명세서만 보이고 나머지는 숨김 */
+    body.print-payslip #printHeader,
+    body.print-payslip .cal,
+    body.print-payslip .total,
+    body.print-payslip #summarySection{display:none!important}
+    body.print-payslip #payslip{display:block}
   }
 </style>
 </head>
@@ -204,6 +226,30 @@
       </table>
     </div>
     <p class="hint">· 위 표는 선택한 달(<span id="sumMonthLabel"></span>) 기준 직원별 급여와 전체 합계입니다. · 달을 바꾸려면 상단 화살표를 누르세요.</p>
+  </div>
+
+  <div id="payslip">
+    <h1>급 여 명 세 서</h1>
+    <div class="ps-sub"><span id="ps_period"></span> 귀속</div>
+    <table class="ps-info">
+      <tr><th>성명</th><td id="ps_name"></td><th>소속</th><td id="ps_group"></td></tr>
+      <tr><th>시급</th><td id="ps_wage"></td><th>발급일</th><td id="ps_date"></td></tr>
+    </table>
+    <table class="ps-pay">
+      <thead><tr><th>지급 항목</th><th>금액</th><th>공제 항목</th><th>금액</th></tr></thead>
+      <tbody>
+        <tr><td>기본급 (근무 <span id="ps_hours"></span>시간)</td><td id="ps_base" class="amt"></td>
+            <td>소득세 등 (<span id="ps_rate"></span>%)</td><td id="ps_tax" class="amt"></td></tr>
+        <tr><td>주휴수당 (주휴 <span id="ps_hol"></span>시간)</td><td id="ps_holpay" class="amt"></td>
+            <td></td><td></td></tr>
+      </tbody>
+      <tfoot>
+        <tr><th>지급액 계</th><td id="ps_total" class="amt"></td><th>공제액 계</th><td id="ps_deduct" class="amt"></td></tr>
+      </tfoot>
+    </table>
+    <div class="ps-net"><span>실수령액</span><b id="ps_net"></b></div>
+    <div class="ps-note">위와 같이 급여를 지급합니다.</div>
+    <div class="ps-issuer"><span id="ps_issuer"></span> <span class="ps-seal">(인)</span></div>
   </div>
 </div>
 
@@ -605,7 +651,40 @@ $('exportBtn').onclick=()=>{
   a.href=url; a.download=`급여관리_백업_${today}.json`;
   a.click(); URL.revokeObjectURL(url);
 };
-$('pdfBtn').onclick=()=>window.print();
+function renderPayslip(){
+  const emp=state.employees[state.active];
+  const y=state.year, m=state.month;
+  const r=computeMonth(emp,y,m);
+  const base=r.hours*emp.wage;
+  const holpay=r.holiday*emp.wage;
+  const hh=v=>Math.round(v*10)/10;
+  const d=new Date();
+  $('ps_period').textContent = `${y}년 ${m+1}월`;
+  $('ps_name').textContent   = emp.name||'-';
+  $('ps_group').textContent  = emp.group||'카페';
+  $('ps_wage').textContent   = KRW(emp.wage);
+  $('ps_date').textContent   = `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
+  $('ps_hours').textContent  = hh(r.hours);
+  $('ps_hol').textContent    = hh(r.holiday);
+  $('ps_rate').textContent   = emp.taxrate;
+  $('ps_base').textContent   = KRW(base);
+  $('ps_holpay').textContent = KRW(holpay);
+  $('ps_total').textContent  = KRW(r.pay);
+  $('ps_tax').textContent    = KRW(r.tax);
+  $('ps_deduct').textContent = KRW(r.tax);
+  $('ps_net').textContent    = KRW(r.net);
+  $('ps_issuer').textContent = (emp.group||'카페')+' 대표';
+}
+$('pdfBtn').onclick=()=>{
+  if(summaryMode){
+    document.body.classList.remove('print-payslip');
+  }else{
+    renderPayslip();
+    document.body.classList.add('print-payslip');
+  }
+  window.print();
+};
+window.addEventListener('afterprint',()=>document.body.classList.remove('print-payslip'));
 $('inviteBtn').onclick=async()=>{
   const link=location.origin+location.pathname+'#room='+roomId;
   let copied=false;
