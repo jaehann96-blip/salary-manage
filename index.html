@@ -76,6 +76,17 @@
   #sumTable tr.subtotal td.net{color:var(--accent)}
   .grouplabel{font-size:11px;font-weight:700;color:var(--muted);background:#f1f5f9;border-radius:6px;
     padding:4px 8px;align-self:center;margin-left:4px}
+  .groupchip{display:flex;align-items:center;gap:8px;padding:9px 14px;border:1px solid var(--line);
+    background:#f1f5f9;border-radius:10px;cursor:pointer;font-size:14px;font-weight:700;user-select:none}
+  .groupchip.open{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+  .groupchip .gtoggle{font-size:10px}
+  .groupchip .gcount{font-size:11px;font-weight:700;background:#fff;border:1px solid var(--line);
+    border-radius:999px;padding:1px 8px;color:var(--muted)}
+  .groupchip .gedit,.groupchip .gdel{opacity:.45;font-size:12px;font-weight:bold}
+  .groupchip .gedit:hover,.groupchip .gdel:hover{opacity:1}
+  .groupbox{flex-basis:100%;display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+    padding:10px 0 10px 14px;margin-left:6px;border-left:2px solid var(--accent)}
+  .groupempty{font-size:13px;color:var(--muted);padding:0 6px}
   #printHeader h2{margin:0 0 4px;font-size:22px}
   #printHeader #phMeta{font-size:13px;color:#374151;margin-bottom:8px}
   @media (max-width:640px){
@@ -238,6 +249,12 @@ function migrate(s){
     if(!e.hours) e.hours={};
     if(!e.group) e.group='카페';
   });
+  if(!Array.isArray(s.groups)){
+    s.groups=[...new Set(s.employees.map(e=>e.group||'카페'))];
+    ['카페','편의점'].forEach(g=>{ if(!s.groups.includes(g)) s.groups.push(g); });
+  }
+  // 직원이 속한 그룹은 반드시 목록에 있어야 함
+  s.employees.forEach(e=>{ if(!s.groups.includes(e.group)) s.groups.push(e.group); });
   delete s.wage; delete s.taxrate;
   return s;
 }
@@ -307,11 +324,13 @@ $('taxrate').addEventListener('input',()=>{
   state.employees[state.active].taxrate=parseFloat($('taxrate').value)||0; save(); recalc();
 });
 $('empGroup').addEventListener('input',()=>{
-  state.employees[state.active].group=$('empGroup').value.trim()||'카페'; save(); renderTabs(); refreshGroupList();
+  const g=$('empGroup').value.trim()||'카페';
+  state.employees[state.active].group=g;
+  if(!state.groups.includes(g)) state.groups.push(g);
+  openGroup=g; save(); renderTabs(); refreshGroupList();
 });
 function refreshGroupList(){
-  const groups=[...new Set(state.employees.map(e=>e.group||'카페'))];
-  $('groupList').innerHTML=groups.map(g=>`<option value="${g}">`).join('');
+  $('groupList').innerHTML=state.groups.map(g=>`<option value="${g}">`).join('');
 }
 
 $('prev').onclick=()=>{ state.month--; if(state.month<0){state.month=11;state.year--;} save(); render(); };
@@ -326,41 +345,95 @@ function key(y,m,d){ return y+'-'+(m+1)+'-'+d; }
 
 let summaryMode=false;
 
-function groupOrder(){
-  const gs=[]; state.employees.forEach(e=>{ const g=e.group||'카페'; if(!gs.includes(g)) gs.push(g); });
-  return gs;
+let openGroup=null;
+function groupOrder(){ return state.groups.slice(); }
+
+function addGroup(){
+  const name=prompt('새 그룹 이름을 입력하세요 (예: 주방, 홀)','');
+  if(name==null) return;
+  const g=name.trim(); if(!g) return;
+  if(state.groups.includes(g)){ alert('이미 있는 그룹입니다.'); openGroup=g; renderTabs(); return; }
+  state.groups.push(g); openGroup=g; save(); renderTabs();
 }
+function renameGroup(g){
+  const name=prompt('그룹 이름 변경',g);
+  if(name==null) return;
+  const nn=name.trim(); if(!nn||nn===g) return;
+  if(state.groups.includes(nn)){ alert('이미 있는 그룹입니다.'); return; }
+  state.groups=state.groups.map(x=>x===g?nn:x);
+  state.employees.forEach(e=>{ if((e.group||'카페')===g) e.group=nn; });
+  if(openGroup===g) openGroup=nn;
+  save(); render();
+}
+function deleteGroup(g){
+  const members=state.employees.filter(e=>(e.group||'카페')===g);
+  if(members.length>0){ alert(`'${g}' 그룹에 직원이 ${members.length}명 있습니다.\n먼저 직원을 다른 그룹으로 옮기거나 삭제해 주세요.`); return; }
+  if(state.groups.length<=1){ alert('그룹은 최소 1개가 있어야 합니다.'); return; }
+  if(!confirm(`'${g}' 그룹을 삭제할까요?`)) return;
+  state.groups=state.groups.filter(x=>x!==g);
+  if(openGroup===g) openGroup=null;
+  save(); render();
+}
+
 function renderTabs(){
   const t=$('tabs'); t.innerHTML='';
-  groupOrder().forEach(g=>{
-    const lab=document.createElement('div');
-    lab.className='grouplabel'; lab.textContent=g;
-    t.appendChild(lab);
-    state.employees.forEach((e,i)=>{
-      if((e.group||'카페')!==g) return;
-      const el=document.createElement('div');
-      el.className='tab'+((!summaryMode&&i===state.active)?' active':'');
-      el.innerHTML = `<span>${e.name||'(이름없음)'}</span>` +
-        (state.employees.length>1?` <span class="del" title="삭제">✕</span>`:'');
-      el.querySelector('span').onclick=()=>{ summaryMode=false; state.active=i; save(); render(); };
-      const del=el.querySelector('.del');
-      if(del) del.onclick=(ev)=>{ev.stopPropagation();
-        if(confirm(`'${e.name}' 직원을 삭제할까요?`)){
-          state.employees.splice(i,1);
-          if(state.active>=state.employees.length) state.active=state.employees.length-1;
-          save(); render();
-        }
-      };
-      t.appendChild(el);
-    });
+  state.groups.forEach(g=>{
+    const members=[];
+    state.employees.forEach((e,i)=>{ if((e.group||'카페')===g) members.push(i); });
+    const open = openGroup===g;
+    const head=document.createElement('div');
+    head.className='groupchip'+(open?' open':'');
+    head.innerHTML=`<span class="gtoggle">${open?'▼':'▶'}</span>`+
+      `<span class="gname">${g}</span>`+
+      `<span class="gcount">${members.length}</span>`+
+      `<span class="gedit" title="그룹 이름 변경">✎</span>`+
+      `<span class="gdel" title="그룹 삭제">✕</span>`;
+    const toggle=()=>{ openGroup=open?null:g; renderTabs(); };
+    head.querySelector('.gtoggle').onclick=toggle;
+    head.querySelector('.gname').onclick=toggle;
+    head.querySelector('.gedit').onclick=(ev)=>{ev.stopPropagation(); renameGroup(g);};
+    head.querySelector('.gdel').onclick=(ev)=>{ev.stopPropagation(); deleteGroup(g);};
+    t.appendChild(head);
+
+    if(open){
+      const box=document.createElement('div');
+      box.className='groupbox';
+      members.forEach(i=>{
+        const e=state.employees[i];
+        const el=document.createElement('div');
+        el.className='tab'+((!summaryMode&&i===state.active)?' active':'');
+        el.innerHTML = `<span>${e.name||'(이름없음)'}</span>` +
+          (state.employees.length>1?` <span class="del" title="삭제">✕</span>`:'');
+        el.querySelector('span').onclick=()=>{ summaryMode=false; state.active=i; openGroup=g; save(); render(); };
+        const del=el.querySelector('.del');
+        if(del) del.onclick=(ev)=>{ev.stopPropagation();
+          if(confirm(`'${e.name}' 직원을 삭제할까요?`)){
+            state.employees.splice(i,1);
+            if(state.active>=state.employees.length) state.active=state.employees.length-1;
+            save(); render();
+          }
+        };
+        box.appendChild(el);
+      });
+      if(members.length===0){
+        const empty=document.createElement('div');
+        empty.className='groupempty'; empty.textContent='(직원 없음)';
+        box.appendChild(empty);
+      }
+      const add=document.createElement('div');
+      add.className='btn'; add.textContent='+ 직원 추가';
+      add.onclick=()=>{ summaryMode=false;
+        state.employees.push({name:'직원'+(state.employees.length+1),wage:DEF_WAGE,taxrate:DEF_TAX,group:g,hours:{}});
+        state.active=state.employees.length-1; openGroup=g; save(); render(); };
+      box.appendChild(add);
+      t.appendChild(box);
+    }
   });
-  const add=document.createElement('div');
-  add.className='btn'; add.textContent='+ 직원 추가';
-  add.onclick=()=>{ summaryMode=false;
-    const g=(state.employees[state.active]&&state.employees[state.active].group)||'카페';
-    state.employees.push({name:'직원'+(state.employees.length+1),wage:DEF_WAGE,taxrate:DEF_TAX,group:g,hours:{}});
-    state.active=state.employees.length-1; save(); render(); };
-  t.appendChild(add);
+  const addG=document.createElement('div');
+  addG.className='btn'; addG.textContent='+ 그룹 추가';
+  addG.onclick=addGroup;
+  t.appendChild(addG);
+
   const sum=document.createElement('div');
   sum.className='tab'+(summaryMode?' active':'');
   sum.style.marginLeft='8px';
@@ -412,6 +485,7 @@ function renderSummary(){
   let G={hours:0,holiday:0,pay:0,tax:0,net:0}, totalCount=0;
   groupOrder().forEach(g=>{
     const members=state.employees.filter(e=>(e.group||'카페')===g);
+    if(members.length===0) return;
     tb.insertAdjacentHTML('beforeend',`<tr class="grouphead"><td colspan="7">📁 ${g} (${members.length}명)</td></tr>`);
     let S={hours:0,holiday:0,pay:0,tax:0,net:0};
     members.forEach(e=>{
