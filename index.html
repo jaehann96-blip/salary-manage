@@ -120,6 +120,36 @@
     #sumTable th:nth-child(4),#sumTable td:nth-child(4),
     #sumTable th:nth-child(6),#sumTable td:nth-child(6){display:none}
   }
+  /* ===== 기간 설정 모달 ===== */
+  .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;
+    align-items:center;justify-content:center}
+  .modal.on{display:flex}
+  .modal-box{background:#fff;border-radius:14px;padding:22px;width:min(92vw,360px);
+    display:flex;flex-direction:column;gap:14px;box-shadow:0 16px 40px rgba(0,0,0,.25)}
+  .modal-box h3{margin:0;font-size:17px}
+  .modal-box label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px;font-weight:600}
+  .modal-box input{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:15px}
+  .modal-btns{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
+  /* ===== 기간 합산 인쇄 영역 ===== */
+  #periodPrint{display:none;color:#000}
+  #periodPrint .phdr h2{text-align:center;font-size:22px;margin:0 0 4px}
+  #periodPrint .pmeta{text-align:center;font-size:12px;color:#374151;margin-bottom:16px}
+  #periodPrint .pmonth{margin-bottom:18px;page-break-inside:avoid}
+  #periodPrint .pmonth h3{font-size:15px;margin:0 0 6px}
+  #periodPrint table.calprint{width:100%;border-collapse:collapse}
+  #periodPrint table.calprint th,#periodPrint table.calprint td{border:1px solid #999;padding:4px;font-size:11px;text-align:center;vertical-align:top}
+  #periodPrint td.day{position:relative;height:36px}
+  #periodPrint td.day .dnum{font-size:9px;color:#888}
+  #periodPrint td.day .pv{display:block;font-size:13px;font-weight:600;margin-top:2px}
+  #periodPrint td.other{background:#f8fafc;color:#bbb}
+  #periodPrint .sumcell{background:#f1f5f9;font-weight:600}
+  #periodPrint .ptot{font-size:12px;text-align:right;margin-top:4px;font-weight:600}
+  #periodPrint .pgrand{border:2px solid #333;padding:10px 14px;font-size:14px;margin:14px 0 24px;text-align:center}
+  #periodPrint .ps-note{font-size:13px;font-weight:600;margin:0 0 4px}
+  #periodPrint .ps-formula{font-size:11px;color:#374151;margin:0 0 24px}
+  #periodPrint .ps-issuer{text-align:right;font-size:15px;line-height:1.7}
+  #periodPrint .ps-issuer b{font-size:17px;font-weight:800}
+  #periodPrint .ps-issuer .ps-seal{color:#888;margin-left:4px}
   /* ===== 급여명세서 발급 푸터 (인쇄 시에만 표시) ===== */
   #printSign{display:none;color:#000;margin-top:18px}
   #printSign .ps-note{font-size:14px;margin:0 0 4px;font-weight:600}
@@ -141,6 +171,14 @@
     /* 개인 급여명세서 인쇄: 달력 그대로 + 발급 푸터 표시 */
     #printSign{display:block}
     body.print-summary #printSign{display:none}
+    .modal{display:none!important}
+    /* 기간 합산 인쇄: periodPrint만 보이기 */
+    body.print-period #printHeader,
+    body.print-period .cal,
+    body.print-period .total,
+    body.print-period #summarySection,
+    body.print-period #printSign{display:none!important}
+    body.print-period #periodPrint{display:block}
   }
 </style>
 </head>
@@ -227,6 +265,21 @@
     <p class="ps-note">위 내역은 근무시간 및 주휴수당 산정 기준에 따라 작성된 급여명세서입니다.</p>
     <p class="ps-formula">· 주휴수당 = 주간 근무시간 ÷ 5 (주 <span id="ps_thresh"></span>시간 이상 근무 시 지급)　·　세금 = 급여 × <span id="ps_rate"></span>%</p>
     <div class="ps-issuer">발급일 <span id="ps_date"></span><br><b id="ps_issuer"></b> <span class="ps-seal">(인)</span></div>
+  </div>
+
+  <div id="periodPrint"></div>
+</div>
+
+<div id="pdfDialog" class="modal">
+  <div class="modal-box">
+    <h3>급여명세서 기간 설정</h3>
+    <label>시작월 <input type="month" id="pdfStart"></label>
+    <label>종료월 <input type="month" id="pdfEnd"></label>
+    <p style="font-size:12px;color:var(--muted);margin:0">· 선택한 기간(여러 달)을 한 명세서에 합산해 PDF로 만듭니다.</p>
+    <div class="modal-btns">
+      <button class="btn" id="pdfCancel">취소</button>
+      <button class="btn solid" id="pdfMake">PDF 만들기</button>
+    </div>
   </div>
 </div>
 
@@ -665,16 +718,93 @@ function renderPayslip(){
   $('ps_date').textContent   = `${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`;
   $('ps_issuer').textContent = (emp.group||'카페')+' 대표';
 }
+function buildMonthCalHTML(emp,y,m){
+  const first=new Date(y,m,1);
+  const start=new Date(y,m,1-first.getDay());
+  let cur=new Date(start);
+  const hh=v=>Math.round(v*10)/10;
+  let rows='', tH=0,tHol=0,tPay=0,tTax=0,tNet=0;
+  for(let w=0;w<6;w++){
+    let days='', weekHours=0, anyInMonth=false;
+    for(let d=0;d<7;d++){
+      const dt=new Date(cur);
+      const inMonth=dt.getMonth()===m;
+      if(inMonth) anyInMonth=true;
+      const k=key(dt.getFullYear(),dt.getMonth(),dt.getDate());
+      const val=(inMonth&&emp.hours[k]!=null)?emp.hours[k]:'';
+      if(inMonth) weekHours+=parseFloat(emp.hours[k])||0;
+      const cls='day'+(d===0?' sun':d===6?' sat':'')+(inMonth?'':' other');
+      days+=`<td class="${cls}"><span class="dnum">${dt.getDate()}</span><span class="pv">${val!==''?val:''}</span></td>`;
+      cur.setDate(cur.getDate()+1);
+    }
+    if(!anyInMonth) continue;
+    const hol=weekHours>=state.thresh?weekHours/5:0;
+    const pay=(weekHours+hol)*emp.wage;
+    const tax=Math.floor(pay*(emp.taxrate/100)/10)*10;
+    const net=pay-tax;
+    tH+=weekHours;tHol+=hol;tPay+=pay;tTax+=tax;tNet+=net;
+    rows+=`<tr>${days}`+
+      `<td class="sumcell">${weekHours?hh(weekHours):'–'}</td>`+
+      `<td class="sumcell">${hol?hol.toFixed(1):'–'}</td>`+
+      `<td class="sumcell">${pay?KRW(pay):'–'}</td>`+
+      `<td class="sumcell">${tax?KRW(tax):'–'}</td>`+
+      `<td class="sumcell">${net?KRW(net):'–'}</td></tr>`;
+  }
+  const head=`<thead><tr><th class="sun">일</th><th>월</th><th>화</th><th>수</th><th>목</th><th>금</th><th class="sat">토</th><th>근무</th><th>주휴</th><th>급여</th><th>세금</th><th>실수령</th></tr></thead>`;
+  return {html:`<table class="calprint">${head}<tbody>${rows}</tbody></table>`,
+          totals:{hours:tH,holiday:tHol,pay:tPay,tax:tTax,net:tNet}};
+}
+function generatePeriodPDF(sy,sm,ey,em){
+  const emp=state.employees[state.active];
+  const hh=v=>Math.round(v*10)/10;
+  let blocks='', G={hours:0,holiday:0,pay:0,tax:0,net:0};
+  let y=sy,mo=sm;
+  while(y<ey || (y===ey && mo<=em)){
+    const r=buildMonthCalHTML(emp,y,mo);
+    ['hours','holiday','pay','tax','net'].forEach(k=>G[k]+=r.totals[k]);
+    blocks+=`<div class="pmonth"><h3>${y}년 ${mo+1}월</h3>${r.html}`+
+      `<div class="ptot">근무 ${hh(r.totals.hours)}시간 · 주휴 ${hh(r.totals.holiday)}시간 · 급여 ${KRW(r.totals.pay)} · 세금 ${KRW(r.totals.tax)} · 실수령 ${KRW(r.totals.net)}</div></div>`;
+    mo++; if(mo>11){mo=0;y++;}
+  }
+  const d=new Date();
+  const period=`${sy}년 ${sm+1}월 ~ ${ey}년 ${em+1}월`;
+  $('periodPrint').innerHTML=
+    `<div class="phdr"><h2>${period} 급여명세서</h2>`+
+    `<div class="pmeta">소속: ${emp.group||'카페'} · 직원: ${emp.name||'-'}${emp.retired?' (퇴직)':''} · 시급: ${KRW(emp.wage)} · 세율: ${emp.taxrate}% · 주휴 기준: 주 ${state.thresh}시간 이상</div></div>`+
+    blocks+
+    `<div class="pgrand">기간 합계 &nbsp; 근무 ${hh(G.hours)}시간 · 주휴 ${hh(G.holiday)}시간 · 총급여 ${KRW(G.pay)} · 세금 ${KRW(G.tax)} · <b>실수령 ${KRW(G.net)}</b></div>`+
+    `<p class="ps-note">위 내역은 근무시간 및 주휴수당 산정 기준에 따라 작성된 급여명세서입니다.</p>`+
+    `<p class="ps-formula">· 주휴수당 = 주간 근무시간 ÷ 5 (주 ${state.thresh}시간 이상 근무 시 지급) · 세금 = 급여 × ${emp.taxrate}%</p>`+
+    `<div class="ps-issuer">발급일 ${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일<br><b>${(emp.group||'카페')+' 대표'}</b> <span class="ps-seal">(인)</span></div>`;
+  document.body.classList.add('print-period');
+  window.print();
+}
 $('pdfBtn').onclick=()=>{
   if(summaryMode){
     document.body.classList.add('print-summary');
-  }else{
-    renderPayslip();
-    document.body.classList.remove('print-summary');
+    window.print();
+    return;
   }
-  window.print();
+  const ym=dt=>`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
+  const cur=new Date(state.year,state.month,1);
+  $('pdfStart').value=ym(cur); $('pdfEnd').value=ym(cur);
+  $('pdfDialog').classList.add('on');
 };
-window.addEventListener('afterprint',()=>document.body.classList.remove('print-summary'));
+$('pdfCancel').onclick=()=>$('pdfDialog').classList.remove('on');
+$('pdfMake').onclick=()=>{
+  const a=$('pdfStart').value, b=$('pdfEnd').value;
+  if(!a||!b){ alert('기간을 선택해 주세요.'); return; }
+  const [sy,sm]=a.split('-').map(Number), [ey,em]=b.split('-').map(Number);
+  const SY=sy,SM=sm-1,EY=ey,EM=em-1;
+  if(EY<SY||(EY===SY&&EM<SM)){ alert('종료월이 시작월보다 빠릅니다.'); return; }
+  $('pdfDialog').classList.remove('on');
+  renderPayslip();
+  generatePeriodPDF(SY,SM,EY,EM);
+};
+window.addEventListener('afterprint',()=>{
+  document.body.classList.remove('print-summary');
+  document.body.classList.remove('print-period');
+});
 $('inviteBtn').onclick=async()=>{
   const link=location.origin+location.pathname+'#room='+roomId;
   let copied=false;
