@@ -129,6 +129,8 @@
   .modal-box h3{margin:0;font-size:17px}
   .modal-box label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px;font-weight:600}
   .modal-box input{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:15px}
+  .ymsel{display:flex;gap:6px}
+  .ymsel select{padding:8px 6px;border:1px solid var(--line);border-radius:8px;font-size:15px;background:#fff}
   .modal-btns{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
   .acc-sec{display:flex;flex-direction:column;gap:6px}
   .acc-title{font-size:13px;font-weight:700;color:var(--muted)}
@@ -229,7 +231,7 @@
       <input id="wage" type="number" step="10" value="10030">
     </label>
     <label class="field" id="taxField">세율 (%)
-      <input id="taxrate" type="number" step="0.1" value="3.3">
+      <input id="taxrate" type="number" step="0.1" value="0.9">
     </label>
     <label class="field" id="groupField">그룹
       <input id="empGroup" list="groupList" placeholder="예: 카페">
@@ -254,7 +256,7 @@
     <div class="item"><span class="lab">총 근무시간</span><span class="big" id="tHours">0</span></div>
     <div class="item"><span class="lab">총 주휴시간</span><span class="big" id="tHoliday" style="color:var(--good)">0</span></div>
     <div class="item"><span class="lab">총 급여</span><span class="big" id="tPay">0원</span></div>
-    <div class="item"><span class="lab">총 세금 (3.3%)</span><span class="big" id="tTax" style="color:var(--warn)">0원</span></div>
+    <div class="item"><span class="lab">총 세금</span><span class="big" id="tTax" style="color:var(--warn)">0원</span></div>
     <div class="item"><span class="lab">월 실수령액</span><span class="big" id="tNet" style="color:var(--good)">0원</span></div>
   </div>
   <p class="hint" id="calHint">· 날짜 칸에 그날 근무한 시간(예: 4.5)을 입력하면 자동 계산됩니다. · 주휴수당 = 주간 근무시간 ÷ 5 (주 기준시간 이상 근무 시). · 입력값은 이 브라우저에 자동 저장됩니다.</p>
@@ -288,9 +290,9 @@
 <div id="pdfDialog" class="modal">
   <div class="modal-box">
     <h3>급여명세서 기간 설정</h3>
-    <label>시작월 <input type="month" id="pdfStart"></label>
-    <label>종료월 <input type="month" id="pdfEnd"></label>
-    <p style="font-size:12px;color:var(--muted);margin:0">· 선택한 기간(여러 달)을 한 명세서에 합산해 PDF로 만듭니다.</p>
+    <label>시작월 <span class="ymsel"><select id="pdfSY"></select><select id="pdfSM"></select></span></label>
+    <label>종료월 <span class="ymsel"><select id="pdfEY"></select><select id="pdfEM"></select></span></label>
+    <p style="font-size:12px;color:var(--muted);margin:0">· 시작월부터 종료월까지 한 명세서에 합산해 PDF로 만듭니다.<br>· 한 달만 뽑으려면 시작월과 종료월을 같게 두세요.</p>
     <div class="modal-btns">
       <button class="btn" id="pdfCancel">취소</button>
       <button class="btn solid" id="pdfMake">PDF 만들기</button>
@@ -340,7 +342,7 @@ const sealHTML = ()=> SEAL_SRC ? `<img class="seal-img" src="${SEAL_SRC}" alt="(
 if(SEAL_SRC){ const _sealPre=new Image(); _sealPre.src=SEAL_SRC; } // 인쇄 시 즉시 표시되도록 미리 로딩
 const LS = 'payroll_v1';
 
-const DEF_WAGE=10030, DEF_TAX=3.3;
+const DEF_WAGE=10030, DEF_TAX=0.9;
 
 let state = load();
 function load(){
@@ -359,6 +361,7 @@ function migrate(s){
   s.employees.forEach(e=>{
     if(e.wage==null) e.wage = (s.wage!=null? s.wage : DEF_WAGE);
     if(e.taxrate==null) e.taxrate = (s.taxrate!=null? s.taxrate : DEF_TAX);
+    if(e.taxrate===3.3) e.taxrate=0.9; // 세율 개정 반영 (3.3% → 0.9%)
     if(!e.hours) e.hours={};
     if(!e.group) e.group='카페';
     if(e.retired==null) e.retired=false;
@@ -898,12 +901,12 @@ function buildMonthCalHTML(emp,y,m){
   return {html:`<table class="calprint">${head}<tbody>${rows}</tbody></table>`,
           totals:{hours:tH,holiday:tHol,pay:tPay,tax:tTax,net:tNet}};
 }
-function generatePeriodPDF(sy,sm,ey,em){
+function generatePeriodPDF(sy,sm,count){
   const emp=state.employees[state.active];
   const hh=v=>Math.round(v*10)/10;
   let blocks='', G={hours:0,holiday:0,pay:0,tax:0,net:0};
   let y=sy,mo=sm;
-  while(y<ey || (y===ey && mo<=em)){
+  for(let i=0;i<count;i++){
     const r=buildMonthCalHTML(emp,y,mo);
     ['hours','holiday','pay','tax','net'].forEach(k=>G[k]+=r.totals[k]);
     blocks+=`<div class="pmonth"><h3>${y}년 ${mo+1}월</h3>${r.html}`+
@@ -911,7 +914,9 @@ function generatePeriodPDF(sy,sm,ey,em){
     mo++; if(mo>11){mo=0;y++;}
   }
   const d=new Date();
-  const period=`${sy}년 ${sm+1}월 ~ ${ey}년 ${em+1}월`;
+  // 마지막 달 계산
+  let ey=sy, em=sm+count-1; ey+=Math.floor(em/12); em=em%12;
+  const period = count===1 ? `${sy}년 ${sm+1}월` : `${sy}년 ${sm+1}월 ~ ${ey}년 ${em+1}월`;
   $('periodPrint').innerHTML=
     `<div class="phdr"><h2>${period} 급여명세서</h2>`+
     `<div class="pmeta">소속: ${emp.group||'카페'} · 직원: ${emp.name||'-'}${emp.retired?' (퇴직)':''} · 시급: ${KRW(emp.wage)} · 세율: ${emp.taxrate}% · 주휴 기준: 주 ${state.thresh}시간 이상</div></div>`+
@@ -929,21 +934,22 @@ $('pdfBtn').onclick=()=>{
     window.print();
     return;
   }
-  const ym=dt=>`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
-  const cur=new Date(state.year,state.month,1);
-  $('pdfStart').value=ym(cur); $('pdfEnd').value=ym(cur);
+  const nowY=state.year;
+  const yOpts=[]; for(let yy=nowY-2; yy<=nowY+1; yy++) yOpts.push(`<option value="${yy}">${yy}년</option>`);
+  const mOpts=[]; for(let mm=1; mm<=12; mm++) mOpts.push(`<option value="${mm}">${mm}월</option>`);
+  ['pdfSY','pdfEY'].forEach(id=>{ $(id).innerHTML=yOpts.join(''); $(id).value=state.year; });
+  ['pdfSM','pdfEM'].forEach(id=>{ $(id).innerHTML=mOpts.join(''); $(id).value=state.month+1; });
   $('pdfDialog').classList.add('on');
 };
 $('pdfCancel').onclick=()=>$('pdfDialog').classList.remove('on');
 $('pdfMake').onclick=()=>{
-  const a=$('pdfStart').value, b=$('pdfEnd').value;
-  if(!a||!b){ alert('기간을 선택해 주세요.'); return; }
-  const [sy,sm]=a.split('-').map(Number), [ey,em]=b.split('-').map(Number);
-  const SY=sy,SM=sm-1,EY=ey,EM=em-1;
-  if(EY<SY||(EY===SY&&EM<SM)){ alert('종료월이 시작월보다 빠릅니다.'); return; }
+  const sy=+$('pdfSY').value, sm=+$('pdfSM').value-1;
+  const ey=+$('pdfEY').value, em=+$('pdfEM').value-1;
+  if(ey<sy || (ey===sy && em<sm)){ alert('종료월이 시작월보다 빠릅니다.\n다시 선택해 주세요.'); return; }
+  const count=(ey-sy)*12+(em-sm)+1;
   $('pdfDialog').classList.remove('on');
   renderPayslip();
-  generatePeriodPDF(SY,SM,EY,EM);
+  generatePeriodPDF(sy,sm,count);
 };
 window.addEventListener('afterprint',()=>{
   document.body.classList.remove('print-summary');
